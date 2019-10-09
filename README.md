@@ -14,13 +14,17 @@ scipy, and pyaudio. It should be cross platform but it is being developed on Lin
 Assuming you can configure your environment to run it, the two scripts work as follows
 
 Recording:
+
 python3 ./recorder.py <output/path/to/file.wav>
 
 Playback:
+
 python3 ./file_scrubber.y <input/file/to/view.wav>
 
 Notes:
+
 The recorder will not allow you to record over an existing file, you must delete the file first
+
 If your OS permits, you can use a temp file like /dev/null for output so you can just play around
 with the visualizer
 
