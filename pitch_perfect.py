@@ -26,6 +26,7 @@ import numpy as np
 import math
 import cmath
 from scipy import signal
+import os 
 
 def myfft( signalBuf, sampleRate, nBins, offset ):
     outBins = (nBins//2) 
@@ -56,22 +57,24 @@ class Example( QMainWindow ):
         super(Example,self).__init__()
        
         self.stream = None
+        self.p = pyaudio.PyAudio()
 
         self.resize(1024, 640)  # The resize() method resizes the widget.
-        self.setWindowTitle("Hello, World!")  # Here we set the title for our window.
-        self.setWindowIcon( QIcon("icon.png") )
-
-        self.statusBar().showMessage("Running!")
+        self.setWindowTitle("Pitch Perfect")  # Here we set the title for our window.
 
         playbar = QWidget()
         sizePolicy = QSizePolicy(QSizePolicy.Minimum,QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
-        self.play = QPushButton("Play")
+        #self.play = QPushButton("Play")
+        self.record = QPushButton("Record")
         self.open = QPushButton("Open")
+        self.stop = QPushButton("Stop")
 
-        self.play.setSizePolicy(sizePolicy)
-        self.play.clicked.connect(self.play_clicked)
+        #self.play.setSizePolicy(sizePolicy)
+        #self.play.clicked.connect(self.play_clicked)
         self.open.clicked.connect(self.open_file)
+        self.record.clicked.connect(self.record_file)
+        self.stop.clicked.connect(self.stop_file)
 
         self.s1 = QScrollBar(Qt.Horizontal)
         self.s1.sliderMoved.connect(self.sliderMoved)
@@ -87,7 +90,9 @@ class Example( QMainWindow ):
         pb_layout = QHBoxLayout()
         playbar.setLayout(pb_layout)
         pb_layout.addWidget(self.open)
-        pb_layout.addWidget(self.play)
+        pb_layout.addWidget(self.record)
+        pb_layout.addWidget(self.stop)
+        self.stop.hide()
         
         layout = QVBoxLayout()
         center.setLayout(layout)
@@ -97,18 +102,49 @@ class Example( QMainWindow ):
 
         self.show()  # The show() method displays the widget on the screen.
 
+    def stop_file(self, event):
+        self.stream.stop_stream()
+        self.stop.hide()
+        self.record.show()
+        self.open.show()
+
     def open_file(self, event):
         fname = QFileDialog.getOpenFileName(self, "Open File", "data", "Audio Files (*.wav)")
-        if( self.stream != None ):
-            self.stream.stop_stream()
+        if( self.stream != None ): self.stream.stop_stream()
 
         self.wavefile = wave.open(fname,'rb')
         self.rate = self.wavefile.getframerate()
         bytes_per_sample = self.wavefile.getsampwidth()
         channels = self.wavefile.getnchannels()
-        self.p = pyaudio.PyAudio()
         self.stream = self.p.open( format=self.p.get_format_from_width(bytes_per_sample), channels=channels, rate=self.rate, frames_per_buffer=self.CHUNK, output=True, stream_callback=self.audio_callback)
         self.stream.start_stream()
+        self.stop.show()
+        self.record.hide()
+        self.open.hide()
+
+    def record_file(self, event):
+        fname = QFileDialog.getSaveFileName(self, "Save File", "data", "Audio Files (*.wav)")
+        if( self.stream != None ): self.stream.stop_stream()
+        if( fname == None or fname == "" ): return
+
+        self.wavefile = wave.open(fname,'wb')
+        self.wavefile.setnchannels(1)
+        self.wavefile.setsampwidth(self.p.get_sample_size(pyaudio.paInt16))
+        self.rate=44100
+        self.wavefile.setframerate(self.rate)
+        self.stream = self.p.open( format=pyaudio.paInt16, channels=1, rate=self.rate, input=True, frames_per_buffer=self.CHUNK, stream_callback=self.write_audio_callback )
+        self.stream.start_stream()
+        self.stop.show()
+        self.record.hide()
+        self.open.hide()
+
+
+    def write_audio_callback( self, in_data, frame_count, time_info, status ):
+        self.wavefile.writeframes( in_data )
+        signalData = np.frombuffer(in_data,dtype=np.int16)
+        zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, 100, 400 )
+        self.sigPlot.setData( *zoomFFTData )
+        return (None, pyaudio.paContinue)
 
     def audio_callback( self, in_data, frame_count, time_info, status ):
         data = self.wavefile.readframes(frame_count)
