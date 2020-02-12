@@ -1,4 +1,5 @@
-##    Pitch Perfect playback, application for playback and scrubbing for 
+#!/usr/bin/python3
+##    Pitch Perfect recorder, application for real time recording and 
 ##    display of fundamental frequency.
 ##    Copyright (C) 2019 Adrian Cheater
 ##
@@ -15,42 +16,20 @@
 ##    You should have received a copy of the GNU General Public License
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from PyQt4.QtCore import *
+import sys
 from PyQt4.QtGui import *
+from PyQt4.QtCore import *
 import pyqtgraph as pg
+import wave
 import pyaudio
 import numpy as np
-import wave
-import time
 import math
 import cmath
 from scipy import signal
-import sys
-
-BINS=1024
-CHUNK=2*BINS
-
-app = QApplication([])
-win = pg.GraphicsWindow(title="file play")
-win.resize(1024,640)
-
-#slider = QSlider(Qt.Horizontal)
-#win.centralLayout.addWidget(slider)
-#signalGraph = win.addPlot(title="Signal")
-#sigPlot = signalGraph.plot(pen='y')
-#signalGraph.setYRange(-10000,10000)
-
-#fftOutput = win.addPlot(title="FFT")
-#fftPlot = fftOutput.plot(pen='y')
-
-zoomFFTOutput = win.addPlot(title="Zoom FFT")
-zoomFFTOutput.setYRange(0,10000)
-zoomFFTPlot = zoomFFTOutput.plot(pen='y')
 
 def myfft( signalBuf, sampleRate, nBins, offset ):
     outBins = (nBins//2) 
     binWidth = (sampleRate/2) / outBins
-#    print( "sampleRate", sampleRate, "min", offset, "outbins", outBins, "binWidth", binWidth, "max", (outBins-1)*binWidth+offset )
     return [ [ offset + i * binWidth for i in range(outBins) ], [abs(x) for x in np.fft.fft(signalBuf,n=nBins)[0:outBins] ] ]
 
 def shiftFrequency( samples, sampleRate, adjustBy ):
@@ -58,6 +37,7 @@ def shiftFrequency( samples, sampleRate, adjustBy ):
     pi2dtcf = 2*math.pi*dt*adjustBy
     vals = [ cmath.exp(1j*pi2dtcf*i)*samples[i] for i in range(len(samples)) ]
     return vals
+
 
 def zoom_fft( samples, sampleRate, nBins, fStart, fEnd ):
     bandwidth = (fEnd - fStart)
@@ -68,38 +48,101 @@ def zoom_fft( samples, sampleRate, nBins, fStart, fEnd ):
     vals = myfft( resampled, newSampleRate, nBins, fStart )    
     return vals
 
-def callback( in_data, frame_count, time_info, status ):
-    data = wavefile.readframes(frame_count)
-    curFrame = wavefile.tell()
-    totalFrames = wavefile.getnframes()
-    rate = wavefile.getframerate()
-    if curFrame == totalFrames: app.quit()
+class Example( QMainWindow ):
+    BINS=1024
+    CHUNK=2*BINS
     
-    signalData = np.frombuffer(data,dtype=np.int16)
-    #sigPlot.setData( signalData )
+    def __init__(self):
+        super(Example,self).__init__()
+       
+        self.stream = None
 
-    #fftData = myfft(signalData, rate, BINS, 0.0)
-    #fftPlot.setData( *fftData )
+        self.resize(1024, 640)  # The resize() method resizes the widget.
+        self.setWindowTitle("Hello, World!")  # Here we set the title for our window.
+        self.setWindowIcon( QIcon("icon.png") )
 
-    zoomFFTData = zoom_fft( signalData, rate, BINS, 140, 300 )
-    zoomFFTPlot.setData( *zoomFFTData )
-    return (data, pyaudio.paContinue)
+        self.statusBar().showMessage("Running!")
 
-print("starting up")
-wavefile = wave.open(sys.argv[1],'rb')
-rate = wavefile.getframerate()
-bytes_per_sample = wavefile.getsampwidth()
-channels = wavefile.getnchannels()
+        playbar = QWidget()
+        sizePolicy = QSizePolicy(QSizePolicy.Minimum,QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(0)
+        self.play = QPushButton("Play")
+        self.open = QPushButton("Open")
 
-p = pyaudio.PyAudio()
-stream = p.open( format=p.get_format_from_width(bytes_per_sample), channels=channels, rate=rate, frames_per_buffer=CHUNK, output=True, stream_callback=callback )
+        self.play.setSizePolicy(sizePolicy)
+        self.play.clicked.connect(self.play_clicked)
+        self.open.clicked.connect(self.open_file)
 
-stream.start_stream()
-print("Starting app")
-app.exec()
+        self.s1 = QScrollBar(Qt.Horizontal)
+        self.s1.sliderMoved.connect(self.sliderMoved)
 
-print("Shutting down")
-stream.stop_stream()
-stream.close()
-wavefile.close()
-p.terminate()
+        signalGraph = pg.PlotWidget()
+        signalGraph.setTitle("Zoom FFT")
+        self.sigPlot = signalGraph.plot(pen='y')
+        signalGraph.setYRange(0,10000)
+        
+        center = QWidget()
+        self.setCentralWidget(center)
+
+        pb_layout = QHBoxLayout()
+        playbar.setLayout(pb_layout)
+        pb_layout.addWidget(self.open)
+        pb_layout.addWidget(self.play)
+        
+        layout = QVBoxLayout()
+        center.setLayout(layout)
+        layout.addWidget(playbar)
+        layout.addWidget(self.s1)
+        layout.addWidget(signalGraph)
+
+        self.show()  # The show() method displays the widget on the screen.
+
+    def open_file(self, event):
+        fname = QFileDialog.getOpenFileName(self, "Open File", "data", "Audio Files (*.wav)")
+        if( self.stream != None ):
+            self.stream.stop_stream()
+
+        self.wavefile = wave.open(fname,'rb')
+        self.rate = self.wavefile.getframerate()
+        bytes_per_sample = self.wavefile.getsampwidth()
+        channels = self.wavefile.getnchannels()
+        self.p = pyaudio.PyAudio()
+        self.stream = self.p.open( format=self.p.get_format_from_width(bytes_per_sample), channels=channels, rate=self.rate, frames_per_buffer=self.CHUNK, output=True, stream_callback=self.audio_callback)
+        self.stream.start_stream()
+
+    def audio_callback( self, in_data, frame_count, time_info, status ):
+        data = self.wavefile.readframes(frame_count)
+        curFrame = self.wavefile.tell()
+        totalFrames = self.wavefile.getnframes()
+#        rate = self.wavefile.getframerate()
+
+        #self.statusBar().showMessage( str(100.0 * curFrame / totalFrames) + "%" )
+        #print( curFrame, totalFrames, str(100.0 * curFrame / totalFrames) + "%" )
+        signalData = np.frombuffer(data,dtype=np.int16)
+        #sigPlot.setData( signalData )
+
+        #fftData = myfft(signalData, self.rate, self.BINS, 0.0)
+        #fftPlot.setData( *fftData )
+
+        zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, 100, 400 )
+        self.sigPlot.setData( *zoomFFTData )
+        return (data, pyaudio.paContinue)
+
+    def sliderMoved(self):
+        print( self.s1.value() )
+
+    def closeEvent(self, event):
+        self.statusBar().showMessage("Wait, what?")
+        reply = QMessageBox.question(self,"Message","Really quit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if( reply == QMessageBox.Yes ):
+            event.accept()
+        else:
+            self.statusBar().showMessage("Whew!")
+            event.ignore()
+
+    def play_clicked(self, event):
+        print("Clicked!")
+
+app = QApplication(sys.argv)
+ex = Example()
+sys.exit(app.exec_())  # Finally, we enter the mainloop of the application.

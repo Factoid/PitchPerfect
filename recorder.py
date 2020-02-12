@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 ##    Pitch Perfect recorder, application for real time recording and 
 ##    display of fundamental frequency.
 ##    Copyright (C) 2019 Adrian Cheater
