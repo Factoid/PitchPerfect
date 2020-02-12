@@ -39,7 +39,6 @@ def shiftFrequency( samples, sampleRate, adjustBy ):
     vals = [ cmath.exp(1j*pi2dtcf*i)*samples[i] for i in range(len(samples)) ]
     return vals
 
-
 def zoom_fft( samples, sampleRate, nBins, fStart, fEnd ):
     bandwidth = (fEnd - fStart)
     decFactor = sampleRate//bandwidth//2
@@ -59,19 +58,18 @@ class Example( QMainWindow ):
         self.stream = None
         self.p = pyaudio.PyAudio()
 
+        if( not os.path.isdir( "data" ) ): os.mkdir("data")
+
         self.resize(1024, 640)  # The resize() method resizes the widget.
         self.setWindowTitle("Pitch Perfect")  # Here we set the title for our window.
 
         playbar = QWidget()
         sizePolicy = QSizePolicy(QSizePolicy.Minimum,QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
-        #self.play = QPushButton("Play")
         self.record = QPushButton("Record")
         self.open = QPushButton("Open")
         self.stop = QPushButton("Stop")
 
-        #self.play.setSizePolicy(sizePolicy)
-        #self.play.clicked.connect(self.play_clicked)
         self.open.clicked.connect(self.open_file)
         self.record.clicked.connect(self.record_file)
         self.stop.clicked.connect(self.stop_file)
@@ -111,6 +109,7 @@ class Example( QMainWindow ):
     def open_file(self, event):
         fname = QFileDialog.getOpenFileName(self, "Open File", "data", "Audio Files (*.wav)")
         if( self.stream != None ): self.stream.stop_stream()
+        if( fname == None or fname == "" ): return
 
         self.wavefile = wave.open(fname,'rb')
         self.rate = self.wavefile.getframerate()
@@ -138,7 +137,6 @@ class Example( QMainWindow ):
         self.record.hide()
         self.open.hide()
 
-
     def write_audio_callback( self, in_data, frame_count, time_info, status ):
         self.wavefile.writeframes( in_data )
         signalData = np.frombuffer(in_data,dtype=np.int16)
@@ -150,16 +148,11 @@ class Example( QMainWindow ):
         data = self.wavefile.readframes(frame_count)
         curFrame = self.wavefile.tell()
         totalFrames = self.wavefile.getnframes()
-#        rate = self.wavefile.getframerate()
+        if( curFrame == totalFrames ):
+            self.stop.click()
+            return (None, pyaudio.paComplete)
 
-        #self.statusBar().showMessage( str(100.0 * curFrame / totalFrames) + "%" )
-        #print( curFrame, totalFrames, str(100.0 * curFrame / totalFrames) + "%" )
         signalData = np.frombuffer(data,dtype=np.int16)
-        #sigPlot.setData( signalData )
-
-        #fftData = myfft(signalData, self.rate, self.BINS, 0.0)
-        #fftPlot.setData( *fftData )
-
         zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, 100, 400 )
         self.sigPlot.setData( *zoomFFTData )
         return (data, pyaudio.paContinue)
@@ -168,16 +161,11 @@ class Example( QMainWindow ):
         print( self.s1.value() )
 
     def closeEvent(self, event):
-        self.statusBar().showMessage("Wait, what?")
-        reply = QMessageBox.question(self,"Message","Really quit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        reply = QMessageBox.question(self,"Quit Application","Really quit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if( reply == QMessageBox.Yes ):
             event.accept()
         else:
-            self.statusBar().showMessage("Whew!")
             event.ignore()
-
-    def play_clicked(self, event):
-        print("Clicked!")
 
 app = QApplication(sys.argv)
 ex = Example()

@@ -11,22 +11,7 @@ as they are tools that I am personally using in my own vocal training.
 The software is written in python3, and has dependencies on PyQt4, pyqtgraph, numpy
 scipy, and pyaudio. It should be cross platform but it is being developed on Linux
 
-Assuming you can configure your environment to run it, the two scripts work as follows
+The record and playback functions have now been unified in the pitch_perfect.py application.
+Upon launch you will be able to choose a file for playback, or a file for recording.
 
-Recording:
-
-python3 ./recorder.py <output/path/to/file.wav>
-
-Playback:
-
-python3 ./file_scrubber.y <input/file/to/view.wav>
-
-Notes:
-
-The recorder will not allow you to record over an existing file, you must delete the file first
-
-If your OS permits, you can use a temp file like /dev/null for output so you can just play around
-with the visualizer
-
-The playback application will display the same 140-300 Hz band from a previously recorded file, automatically
-closing when the playback is complete.
+Once playback or recording has begun you may click stop to end the operation.
