@@ -17,8 +17,9 @@
 ##    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import sys
-from PyQt4.QtGui import *
-from PyQt4.QtCore import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from PyQt5.QtWidgets import *
 import pyqtgraph as pg
 import wave
 import pyaudio
@@ -26,7 +27,8 @@ import numpy as np
 import math
 import cmath
 from scipy import signal
-import os 
+import os
+from collections import deque
 
 def myfft( signalBuf, sampleRate, nBins, offset ):
     outBins = (nBins//2) 
@@ -49,8 +51,12 @@ def zoom_fft( samples, sampleRate, nBins, fStart, fEnd ):
     return vals
 
 class Example( QMainWindow ):
-    BINS=1024
-    CHUNK=2*BINS
+    BINS=512
+    RANGE=BINS
+
+    LOW = 80
+    HIGH = LOW+BINS
+    CHUNK=RANGE*2
     
     def __init__(self):
         super(Example,self).__init__()
@@ -80,7 +86,12 @@ class Example( QMainWindow ):
         signalGraph = pg.PlotWidget()
         signalGraph.setTitle("Zoom FFT")
         self.sigPlot = signalGraph.plot(pen='y')
-        signalGraph.setYRange(0,10000)
+        signalGraph.setXRange(self.LOW,self.HIGH)
+
+        pitchGraph = pg.PlotWidget()
+        pitchGraph.setTitle("F0 Tracking")
+        self.pitchPlot = pitchGraph.plot(pen='b')
+        pitchGraph.setYRange(self.LOW,self.HIGH)
         
         center = QWidget()
         self.setCentralWidget(center)
@@ -97,21 +108,27 @@ class Example( QMainWindow ):
         layout.addWidget(playbar)
         layout.addWidget(self.s1)
         layout.addWidget(signalGraph)
+        layout.addWidget(pitchGraph)
 
         self.show()  # The show() method displays the widget on the screen.
+
+        self.pitches = deque(maxlen=200)
 
     def stop_file(self, event):
         self.stream.stop_stream()
         self.stop.hide()
         self.record.show()
         self.open.show()
+        self.timer.stop()
 
     def open_file(self, event):
         fname = QFileDialog.getOpenFileName(self, "Open File", "data", "Audio Files (*.wav)")
         if( self.stream != None ): self.stream.stop_stream()
         if( fname == None or fname == "" ): return
 
-        self.wavefile = wave.open(fname,'rb')
+        self.wavefile = wave.open(fname[0],'rb')
+        self.s1.setMaximum(self.wavefile.getnframes())
+        self.s1.setPageStep(10*44100//self.CHUNK)
         self.rate = self.wavefile.getframerate()
         bytes_per_sample = self.wavefile.getsampwidth()
         channels = self.wavefile.getnchannels()
@@ -121,12 +138,19 @@ class Example( QMainWindow ):
         self.record.hide()
         self.open.hide()
 
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.updateDisplay)
+        self.timer.start(20)
+
+    def updateDisplay(self):
+        self.pitchPlot.setData( self.pitches )
+
     def record_file(self, event):
         fname = QFileDialog.getSaveFileName(self, "Save File", "data", "Audio Files (*.wav)")
         if( self.stream != None ): self.stream.stop_stream()
         if( fname == None or fname == "" ): return
 
-        self.wavefile = wave.open(fname,'wb')
+        self.wavefile = wave.open(fname[0],'wb')
         self.wavefile.setnchannels(1)
         self.wavefile.setsampwidth(self.p.get_sample_size(pyaudio.paInt16))
         self.rate=44100
@@ -139,22 +163,55 @@ class Example( QMainWindow ):
 
     def write_audio_callback( self, in_data, frame_count, time_info, status ):
         self.wavefile.writeframes( in_data )
-        signalData = np.frombuffer(in_data,dtype=np.int16)
-        zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, 100, 400 )
-        self.sigPlot.setData( *zoomFFTData )
+        #signalData = np.frombuffer(in_data,dtype=np.int16)
+        #zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, self.LOW, self.HIGH )
+        #self.updatePitches(zoomFFTData)
+        
         return (None, pyaudio.paContinue)
 
+    def stacked(self, vals):
+        for i in range(1,len(vals)):
+            for j in range(i+1,len(vals)):
+                ratio = vals[j][0]/vals[i][0]
+                frac = ratio - int(ratio)
+                if frac < 0.05 or frac > 0.95:
+                    #breakpoint()
+                    #print( "adding", vals[j][0], "to", vals[i][0] )
+                    vals[i] = (vals[i][0], vals[i][1] + vals[j][1])
+        return vals
+        
+    def updatePitches(self, zoomFFTData):
+#stacking approach
+#        vals = self.stacked( list(zip(*zoomFFTData)) )
+        best = max( zip(*zoomFFTData), key=lambda x: x[1] )
+        self.pitches.append( best[0] )
+
+#strongest signal approach
+#        vals = list(zip(*zoomFFTData))
+        #breakpoint()
+#        softest = min( vals, key=lambda x: x[1])[1]
+#        loudest = max( vals, key=lambda x: x[1])[1]
+#        fvals = list(filter(lambda x: (x[1]-softest)/(loudest-softest) >= 0.75,vals))
+#        if( len(fvals) > 0 ):
+#            best = min( fvals,key=lambda x: x[0] )
+#            self.pitches.append( fvals[0][0] )
+#        else:
+#            self.pitches.append( 0 )
+        
     def audio_callback( self, in_data, frame_count, time_info, status ):
         data = self.wavefile.readframes(frame_count)
         curFrame = self.wavefile.tell()
+        self.s1.setValue(curFrame)
         totalFrames = self.wavefile.getnframes()
         if( curFrame == totalFrames ):
             self.stop.click()
             return (None, pyaudio.paComplete)
 
         signalData = np.frombuffer(data,dtype=np.int16)
-        zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, 100, 400 )
+        zoomFFTData = zoom_fft( signalData, self.rate, self.BINS, self.LOW, self.HIGH )
         self.sigPlot.setData( *zoomFFTData )
+        self.updatePitches(zoomFFTData)
+        
         return (data, pyaudio.paContinue)
 
     def sliderMoved(self):
@@ -164,6 +221,7 @@ class Example( QMainWindow ):
         reply = QMessageBox.question(self,"Quit Application","Really quit?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if( reply == QMessageBox.Yes ):
             event.accept()
+            if self.stream: self.stream.stop_stream()
         else:
             event.ignore()
 
