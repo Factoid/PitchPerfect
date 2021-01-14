@@ -21,6 +21,7 @@
 #define _GST_OPUSVIS_H_
 
 #include <gst/gst.h>
+#include <opus.h>
 
 G_BEGIN_DECLS
 
@@ -39,6 +40,8 @@ struct _GstOpusvis
 {
   GstElement element;
   GstPad *sinkpad, *srcpad;
+
+  OpusDecoder* decoder;
 };
 
 

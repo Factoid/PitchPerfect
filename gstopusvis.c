@@ -38,12 +38,13 @@
 #include <gst/gst.h>
 #include "gstopusvis.h"
 #include <opus.h>
+#include <silk/main.h>
+#include <src/opus_private.h>
 
 GST_DEBUG_CATEGORY_STATIC (gst_opusvis_debug_category);
 #define GST_CAT_DEFAULT gst_opusvis_debug_category
 
 /* prototypes */
-
 
 static void gst_opusvis_set_property (GObject * object,
     guint property_id, const GValue * value, GParamSpec * pspec);
@@ -142,12 +143,7 @@ static gboolean plugin_init (GstPlugin * plugin)
 }
 
 /**** INSTANCE CODE BEGINS *****/
-static GstFlowReturn gst_opusvis_chain(GstPad *pad, GstObject* parent, GstBuffer *buf) {
-  GstOpusvis* opusvis = GST_OPUSVIS(parent);
-//  if( !gst_pad_set_caps(pad,caps) ) {
-//    GST_ELEMENT_ERROR(opusvis, CORE, NEGOTIATION, (NULL), ("Couldn't set caps"));
-//    return GST_FLOW_ERROR;
-//  }
+void handle_opus_frame( GstOpusvis* opusvis, GstBuffer *buf ) {
 
   GstMapInfo info;
   gst_buffer_map( buf, &info, GST_MAP_READ );
@@ -169,13 +165,62 @@ static GstFlowReturn gst_opusvis_chain(GstPad *pad, GstObject* parent, GstBuffer
       g_print( "Full band\n" );
       break;
     case OPUS_INVALID_PACKET:
-      g_print( "Invalid packer" );
+      g_print( "Invalid packet\n" );
       break;
-   }
+  }
+
+  int mode = opus_packet_get_mode( info.data );
+  switch( mode ) {
+    case MODE_CELT_ONLY:
+      g_print( "CELT only mode\n" );
+      break;
+    case MODE_SILK_ONLY:
+      g_print( "SILK only mode\n" );
+      break;
+    default:
+      g_print( "Hybrid mode\n" ); 
+  }
+
+  int nframes = opus_packet_get_nb_frames(info.data, info.size);
 
   g_print( "Number of frames %i\n", opus_packet_get_nb_frames(info.data, info.size) );
 
+  if( nframes > 0 ) {  
+    unsigned char toc;
+    const unsigned char* frames[48];
+    opus_int16 frameSize[48];
+    int payloadOffset;
+
+    opus_packet_parse( info.data, info.size, &toc, frames, frameSize, &payloadOffset );
+
+    g_print( "TOC : %X, payload offset : %i\n", toc, payloadOffset );
+
+    for( int i = 0; i < nframes; ++i ) {
+      g_print( "frame %i length is %i\n", i, frameSize[i] );
+      
+      if( opusvis->decoder == NULL ) continue;
+
+      opus_inspect_frame( opusvis->decoder, frames[i] );
+      
+    }
+  }
+
+//  silk_decoder_state psDec;
+//  ec_dec psRangeDec;
+  
+  //silk_decode_indices( &psDec, &psRangeDec, psDec.nFramesDecoded, 0, 0 ); 
+
   gst_buffer_unmap(buf, &info);
+}
+
+static GstFlowReturn gst_opusvis_chain(GstPad *pad, GstObject* parent, GstBuffer *buf) {
+  GstOpusvis* opusvis = GST_OPUSVIS(parent);
+//  if( !gst_pad_set_caps(pad,caps) ) {
+//    GST_ELEMENT_ERROR(opusvis, CORE, NEGOTIATION, (NULL), ("Couldn't set caps"));
+//    return GST_FLOW_ERROR;
+//  }
+
+  handle_opus_frame( opusvis, buf );
 
   return gst_pad_push(opusvis->srcpad,buf);
 }
@@ -196,6 +241,13 @@ static gboolean gst_opusvis_src_query( GstPad* pad, GstObject *parent, GstQuery*
 static void
 gst_opusvis_init (GstOpusvis *opusvis)
 {
+  int err;
+  opusvis->decoder = opus_decoder_create( 48000, 1, &err );
+
+  if( err != OPUS_OK ) {
+    g_print( "Couldn't create decoder, error code %i", err );
+  }
+
   opusvis->sinkpad = gst_pad_new_from_static_template(&gst_opusvis_sink_template,"sink");
 //  gst_pad_use_fixed_caps(opusvis->sinkpad);
   GST_PAD_SET_PROXY_CAPS(opusvis->sinkpad);
