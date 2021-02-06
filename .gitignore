@@ -3,3 +3,4 @@ build*
 *.o
 *.so
 lib/opus
+cscope.out
