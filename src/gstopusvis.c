@@ -40,6 +40,33 @@
 #include <opus.h>
 #include <silk/main.h>
 #include <src/opus_private.h>
+#include <silk/structs.h>
+
+struct OpusDecoder {
+   int          celt_dec_offset;
+   int          silk_dec_offset;
+   int          channels;
+   opus_int32   Fs;          /** Sampling rate (at the API level) */
+   silk_DecControlStruct DecControl;
+   int          decode_gain;
+   int          arch;
+
+   /* Everything beyond this point gets cleared on a reset */
+#define OPUS_DECODER_RESET_START stream_channels
+   int          stream_channels;
+
+   int          bandwidth;
+   int          mode;
+   int          prev_mode;
+   int          frame_size;
+   int          prev_redundancy;
+   int          last_packet_duration;
+#ifndef FIXED_POINT
+   opus_val16   softclip_mem[2];
+#endif
+
+   opus_uint32  rangeFinal;
+};
 
 GST_DEBUG_CATEGORY_STATIC (gst_opusvis_debug_category);
 #define GST_CAT_DEFAULT gst_opusvis_debug_category
@@ -144,31 +171,43 @@ static gboolean plugin_init (GstPlugin * plugin)
 
 /**** INSTANCE CODE BEGINS *****/
 void handle_opus_frame( GstOpusvis* opusvis, GstBuffer *buf ) {
-
+  const int bLen = 48000/50; 
+  opus_int16 decode_buffer[bLen];
   GstMapInfo info;
   gst_buffer_map( buf, &info, GST_MAP_READ );
 
+  int Fs = 0;
   switch( opus_packet_get_bandwidth(info.data) ) {
     case OPUS_BANDWIDTH_NARROWBAND:
-      g_print( "Narrow band\n" );
+      Fs = 8000;
+      //g_print( "Narrow band\n" );
       break;
     case OPUS_BANDWIDTH_MEDIUMBAND:
-      g_print( "Medium band\n" );
+      Fs = 12000;
+      //g_print( "Medium band\n" );
       break;
     case OPUS_BANDWIDTH_WIDEBAND:
-      g_print( "Wide band\n" );
+      Fs = 16000;
+      //g_print( "Wide band\n" );
       break;
     case OPUS_BANDWIDTH_SUPERWIDEBAND:
-      g_print( "Super wide band\n" );
+      Fs = 24000;
+      //g_print( "Super wide band\n" );
       break;
     case OPUS_BANDWIDTH_FULLBAND:
-      g_print( "Full band\n" );
+      Fs = 48000;
+      //g_print( "Full band\n" );
       break;
     case OPUS_INVALID_PACKET:
-      g_print( "Invalid packet\n" );
+      //g_print( "Invalid packet\n" );
       break;
   }
 
+  if( Fs == 0 ) {
+    gst_buffer_unmap(buf, &info);
+    return;
+  }
+/*
   int mode = opus_packet_get_mode( info.data );
   switch( mode ) {
     case MODE_CELT_ONLY:
@@ -180,7 +219,16 @@ void handle_opus_frame( GstOpusvis* opusvis, GstBuffer *buf ) {
     default:
       g_print( "Hybrid mode\n" ); 
   }
-
+*/
+  silk_decoder_control slkDecCtrl;
+  //int ret = opus_inspect( opusvis->decoder, info.data, info.size, decode_buffer, bLen, 0, &slkDecCtrl );
+  int ret = opus_decode( opusvis->decoder, info.data, info.size, decode_buffer, bLen, 0 );
+  //g_print("ret = %i\n",ret);
+  if( opusvis->decoder->DecControl.prevPitchLag != 0 ) {
+    float plToHz = 48000.0f / opusvis->decoder->DecControl.prevPitchLag;
+    g_print( "pitch %i %f\n", opusvis->decoder->DecControl.prevPitchLag, plToHz );
+  }
+/*
   int nframes = opus_packet_get_nb_frames(info.data, info.size);
 
   g_print( "Number of frames %i\n", opus_packet_get_nb_frames(info.data, info.size) );
@@ -200,11 +248,18 @@ void handle_opus_frame( GstOpusvis* opusvis, GstBuffer *buf ) {
       
       if( opusvis->decoder == NULL ) continue;
 
-      opus_inspect_frame( opusvis->decoder, frames[i] );
-      
+      int packet_frame_size = opus_packet_get_samples_per_frame(info.data, Fs);
+      g_print( "packet frame size is %i\n", packet_frame_size ); 
+   
+      silk_decoder_state *slkDecode = 0;
+      int ret = opus_decode_frame( opusvis->decoder, frames[i], frameSize[i], Fs, 0 );
+
+      g_print( "result %i\n", ret );
+      g_print( "signal type %i\n", slkDecode->indices.signalType );
+      g_print( "pitch %i\n", slkDecode->lagPrev );
     }
   }
-
+*/
 //  silk_decoder_state psDec;
 //  ec_dec psRangeDec;
   
