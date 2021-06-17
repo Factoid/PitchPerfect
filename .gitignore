@@ -4,3 +4,4 @@ build*
 *.so
 lib/opus
 cscope.out
+data/
